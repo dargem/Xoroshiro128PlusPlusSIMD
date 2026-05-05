@@ -63,20 +63,13 @@ public:
 public:
 
    XoroshiroRNG() {
-      // 1. Obtain a non-deterministic seed from hardware
+      // do something actually correct later just slop this for now
       std::random_device rd;
-
-      // 2. Initialize the generator (engine) with the seed
       std::mt19937 gen(rd());
-
-      // 3. Define the distribution (e.g., integers between 1 and 100)
       std::uniform_int_distribution<uint32_t> distr(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max());
-      for (uint32_t& a : a_states) {
-         a = distr(gen);
-      }
-      for (uint32_t& b : b_states) {
-         b = distr(gen);
-      }
+
+      for (uint32_t& a : a_states) { a = distr(gen); }
+      for (uint32_t& b : b_states) { b = distr(gen); }
    }
 
    /**
@@ -87,20 +80,9 @@ public:
     */
    std::array<float, BATCH_SIZE> getBatchFloats() {
       if constexpr (I == InstructionSet::AVX256) {
-         __m256i avx_a = _mm256_load_epi32(a_states.data());
-         __m256i avx_b = _mm256_load_epi32(b_states.data());
-         __m256i mult = _mm256_set1_epi32(0x9E3779BB);
-         __m256i result = _mm256_mullo_epi32(avx_a, mult);
 
-         avx_b = _mm256_xor_si256(avx_a, avx_b);
-         avx_a = rotl(avx_a, 26);
-         avx_a = _mm256_xor_si256(avx_a, avx_b);
-         avx_a = _mm256_xor_si256(avx_a, _mm256_slli_epi32(avx_b, 9));
-         avx_b = rotl(avx_b, 13);
-         
-         _mm256_store_epi32(a_states.data(), avx_a);
-         _mm256_store_epi32(b_states.data(), avx_b);
-      
+         __m256i result = advance();
+
          // Need to convert result into a [0, 1) float
          // bit shift 9 to the right to get rid of sign + 8 bit exponent
          result = _mm256_srli_epi32(result, 9);
@@ -123,6 +105,10 @@ public:
 
       }
    
+   }
+
+   std::array<uint32_t, BATCH_SIZE> getBatchInts() {
+      return std::bit_cast<std::array<uint32_t, BATCH_SIZE>>(advance());   
    }
 
    /**
@@ -152,6 +138,27 @@ private:
    alignas(REGISTER_BYTE_SIZE) std::array<uint32_t, BATCH_SIZE> a_states;
    alignas(REGISTER_BYTE_SIZE) std::array<uint32_t, BATCH_SIZE> b_states;
 
+   auto advance() {
+      if constexpr (I == InstructionSet::AVX256) {
+         __m256i avx_a = _mm256_load_epi32(a_states.data());
+         __m256i avx_b = _mm256_load_epi32(b_states.data());
+         __m256i mult = _mm256_set1_epi32(0x9E3779BB);
+         __m256i result = _mm256_mullo_epi32(avx_a, mult);
+
+         avx_b = _mm256_xor_si256(avx_a, avx_b);
+         avx_a = rotl(avx_a, 26);
+         avx_a = _mm256_xor_si256(avx_a, avx_b);
+         avx_a = _mm256_xor_si256(avx_a, _mm256_slli_epi32(avx_b, 9));
+         avx_b = rotl(avx_b, 13);
+         
+         _mm256_store_epi32(a_states.data(), avx_a);
+         _mm256_store_epi32(b_states.data(), avx_b);
+
+         return result;
+      }
+   }
+
+   [[nodiscard]]
    __m256i rotl(__m256i x, const int k) {
       return _mm256_or_si256(
          _mm256_slli_epi32(x, k), 
