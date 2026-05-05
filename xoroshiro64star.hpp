@@ -40,6 +40,8 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 #include <array>
 #include <cassert>
 #include <immintrin.h>
+#include <random>
+#include <limits>
 
 enum class InstructionSet {
    AVX256,
@@ -51,13 +53,31 @@ template <InstructionSet I>
 static constexpr size_t RegisterByteSize = (I == InstructionSet::AVX256 ? 256 / 8 : 512 / 8);
 
 // Change the defaulted instruction set to select it
-template <InstructionSet I = InstructionSet::AVX512>
+template <InstructionSet I = InstructionSet::AVX256>
 class alignas(RegisterByteSize<I>) XoroshiroRNG {
 private:
    constexpr static size_t REGISTER_BYTE_SIZE = RegisterByteSize<I>;
 public:
    constexpr static size_t ELEMENT_SIZE = sizeof(float);
    constexpr static size_t BATCH_SIZE = REGISTER_BYTE_SIZE / ELEMENT_SIZE;
+public:
+
+   XoroshiroRNG() {
+      // 1. Obtain a non-deterministic seed from hardware
+      std::random_device rd;
+
+      // 2. Initialize the generator (engine) with the seed
+      std::mt19937 gen(rd());
+
+      // 3. Define the distribution (e.g., integers between 1 and 100)
+      std::uniform_int_distribution<uint32_t> distr(std::numeric_limits<uint32_t>::min(), std::numeric_limits<uint32_t>::max());
+      for (uint32_t& a : a_states) {
+         a = distr(gen);
+      }
+      for (uint32_t& b : b_states) {
+         b = distr(gen);
+      }
+   }
 
    /**
     * @brief Get a batch of floats in an array container
@@ -79,7 +99,7 @@ public:
          avx_b = rotl(avx_b, 13);
          
          _mm256_store_epi32(a_states.data(), avx_a);
-         _mm256_store_epi32(b_states, avx_b);
+         _mm256_store_epi32(b_states.data(), avx_b);
       
          // Need to convert result into a [0, 1) float
          // bit shift 9 to the right to get rid of sign + 8 bit exponent
@@ -95,14 +115,15 @@ public:
          result = _mm256_xor_epi32(result, sign_exp_set);
 
          // now we want to -1 to transform [1, 2) to [0, 1), reinterpreting our int bits as float bits
-         __m256 sub1 = _mm256_set1_ps(1.0f);
-         __m256 floats = _mm256_add_ps(_mm256_castsi256_ps(result), sub1);
+         __m256 one = _mm256_set1_ps(1.0f);
+         __m256 floats = _mm256_sub_ps(_mm256_castsi256_ps(result), one);
          return std::bit_cast<std::array<float, BATCH_SIZE>>(floats);
       }
       else if constexpr(I == InstructionSet::AVX512) {
 
       }
-   };
+   
+   }
 
    /**
     * @brief generate a batch of 8 floats
@@ -138,25 +159,3 @@ private:
       );
    }
 };
-
-
-static inline uint32_t rotl(const uint32_t x, int k) {
-	return (x << k) | (x >> (32 - k));
-}
-
-
-
-static uint32_t s[2];
-
-uint32_t next(void) {
-	const uint32_t s0 = s[0];
-	uint32_t s1 = s[1];
-	const uint32_t result = s0 * 0x9E3779BB;
-
-
-	s1 ^= s0;
-	s[0] = rotl(s0, 26) ^ s1 ^ (s1 << 9); // a, b
-	s[1] = rotl(s1, 13); // c
-
-	return result;
-}
