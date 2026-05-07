@@ -60,21 +60,35 @@ struct InstructionSetTraits<InstructionSet::AVX256> {
    using __m = __m256;
 
    // Integer ops
-   static __mi _mm_srli_epi32(__mi a, int bits) { return _mm256_srli_epi32(a, bits); }
-   static __mi _mm_slli_epi32(__mi a, int bits) { return _mm256_slli_epi32(a, bits); }
-   static __mi _mm_set1_epi32(int val) { return _mm256_set1_epi32(val); }
-   static __mi _mm_mullo_epi32(__mi a, __mi b) { return _mm256_mullo_epi32(a, b); }
+   template <int b> // needs a compile time constant
+   static __mi rol_epi32(__mi a) { 
+      #if defined (__AVX512F__)
+         // this 256 bit register instruction is actually from the AVX512 instruction set
+         return _mm256_rol_epi32(a, bits); 
+      #else
+         // if we do not have the AVX512 instruction set default back to our 256 "emulation"
+         return or_si(
+            slli_epi32(a, b), 
+            srli_epi32(a, 32 - b)
+         );
+      #endif
+   }
+
+   static __mi srli_epi32(__mi a, int bits) { return _mm256_srli_epi32(a, bits); }
+   static __mi slli_epi32(__mi a, int bits) { return _mm256_slli_epi32(a, bits); }
+   static __mi set1_epi32(int val) { return _mm256_set1_epi32(val); }
+   static __mi mullo_epi32(__mi a, __mi b) { return _mm256_mullo_epi32(a, b); }
 
    // Bit ops
-   static __mi _mm_xor_si(__mi a, __mi b) { return _mm256_xor_si256(a, b); }
-   static __mi _mm_or_si(__mi a, __mi b) { return _mm256_or_si256(a, b); }
-   static void _mm_store_si(__mi* mem_addr, __mi source) { _mm256_store_si256(mem_addr, source); }
-   static __mi _mm_load_si(__mi const* mem_addr) { return _mm256_load_si256(mem_addr); }
+   static __mi xor_si(__mi a, __mi b) { return _mm256_xor_si256(a, b); }
+   static __mi or_si(__mi a, __mi b) { return _mm256_or_si256(a, b); }
+   static void store_si(__mi* mem_addr, __mi source) { _mm256_store_si256(mem_addr, source); }
+   static __mi load_si(__mi const* mem_addr) { return _mm256_load_si256(mem_addr); }
 
    // Float ops
-   static __m _mm_sub_ps(__m a, __m b) { return _mm256_sub_ps(a, b); }
-   static __m _mm_set1_ps(float val) { return _mm256_set1_ps(val); }
-   static __m _mm_castsi_ps(__mi a) { return _mm256_castsi256_ps(a); }
+   static __m sub_ps(__m a, __m b) { return _mm256_sub_ps(a, b); }
+   static __m set1_ps(float val) { return _mm256_set1_ps(val); }
+   static __m castsi_ps(__mi a) { return _mm256_castsi256_ps(a); }
 };
 
 template<>
@@ -86,21 +100,24 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
    using __m = __m512;
 
    // Integer ops
-   static __mi _mm_srli_epi32(__mi a, int bits) { return _mm512_srli_epi32(a, bits); }
-   static __mi _mm_slli_epi32(__mi a, int bits) { return _mm512_slli_epi32(a, bits); }
-   static __mi _mm_set1_epi32(int val) { return _mm512_set1_epi32(val); }
-   static __mi _mm_mullo_epi32(__mi a, __mi b) { return _mm512_mullo_epi32(a, b); }
+   template <int b> // needs a compile time constant
+   static __mi rol_epi32(__mi a) { return _mm512_rol_epi32(a, b); }
+   static __mi srli_epi32(__mi a, int bits) { return _mm512_srli_epi32(a, bits); }
+   static __mi slli_epi32(__mi a, int bits) { return _mm512_slli_epi32(a, bits); }
+
+   static __mi set1_epi32(int val) { return _mm512_set1_epi32(val); }
+   static __mi mullo_epi32(__mi a, __mi b) { return _mm512_mullo_epi32(a, b); }
 
    // Bit ops
-   static __mi _mm_xor_si(__mi a, __mi b) { return _mm512_xor_si512(a, b); }
-   static __mi _mm_or_si(__mi a, __mi b) { return _mm512_or_si512(a, b); }
-   static void _mm_store_si(__mi* mem_addr, __mi source) { _mm512_store_si512(mem_addr, source); }
-   static __mi _mm_load_si(__mi const* mem_addr) { return _mm512_load_si512(mem_addr); }
+   static __mi xor_si(__mi a, __mi b) { return _mm512_xor_si512(a, b); }
+   static __mi or_si(__mi a, __mi b) { return _mm512_or_si512(a, b); }
+   static void store_si(__mi* mem_addr, __mi source) { _mm512_store_si512(mem_addr, source); }
+   static __mi load_si(const __mi* mem_addr) { return _mm512_load_si512(mem_addr); }
 
    // Float ops
-   static __m _mm_sub_ps(__m a, __m b) { return _mm512_sub_ps(a, b); }
-   static __m _mm_set1_ps(float val) { return _mm512_set1_ps(val); }
-   static __m _mm_castsi_ps(__mi a) { return _mm512_castsi512_ps(a); }
+   static __m sub_ps(__m a, __m b) { return _mm512_sub_ps(a, b); }
+   static __m set1_ps(float val) { return _mm512_set1_ps(val); }
+   static __m castsi_ps(__mi a) { return _mm512_castsi512_ps(a); }
 };
 
 static inline uint64_t splitmix64_next(uint64_t& x)
@@ -112,14 +129,13 @@ static inline uint64_t splitmix64_next(uint64_t& x)
    return z ^ (z >> 31);
 }
 
-// Change the defaulted instruction set to select it
 template <InstructionSet I>
 class alignas(InstructionSetTraits<I>::bytes) XoroshiroRNG {
 private:
-   using S = InstructionSetTraits<I>;
-   using __m = S::__m;
-   using __mi = S::__mi;
-   constexpr static size_t REGISTER_BYTE_SIZE = S::bytes;
+   using _mm = InstructionSetTraits<I>;
+   using __m = _mm::__m;
+   using __mi = _mm::__mi;
+   constexpr static size_t REGISTER_BYTE_SIZE = _mm::bytes;
 public:
    constexpr static size_t ELEMENT_SIZE = sizeof(float);
    constexpr static size_t BATCH_SIZE = REGISTER_BYTE_SIZE / ELEMENT_SIZE;
@@ -148,7 +164,7 @@ public:
 
       // Need to convert result into a [0, 1) float
       // bit shift 9 to the right to get rid of sign + 8 bit exponent
-      result = S::_mm_srli_epi32(result, 9);
+      result = _mm::srli_epi32(result, 9);
 
       // want this to be converted to [0, 1], want a leading 0 so its signed positive, 
       // for a floating point we know number = 2^n * (1 + mantissa), where mantissa = [0, 1)
@@ -156,12 +172,12 @@ public:
       // therefore [0, 1) = [1, 2) - 1 = 2^0 * (1 + mantissa)
       // want n to equal 0, but n is found through subtracting exponent field by 127 in a float
       // so we want exponent field to be 127 so the computed estimate works to 2^(127 - 127) = 1
-      const __mi sign_exp_set = S::_mm_set1_epi32(0x3F800000);
-      result = S::_mm_xor_si(result, sign_exp_set);
+      const __mi sign_exp_set = _mm::set1_epi32(0x3F800000);
+      result = _mm::xor_si(result, sign_exp_set);
 
       // now we want to -1 to transform [1, 2) to [0, 1), reinterpreting our int bits as float bits
-      __m one = S::_mm_set1_ps(1.0f);
-      __m floats = S::_mm_sub_ps(_mm_castsi_ps(result), one);
+      __m one = _mm::set1_ps(1.0f);
+      __m floats = _mm::sub_ps(_mm::castsi_ps(result), one);
 
       return std::bit_cast<std::array<float, BATCH_SIZE>>(floats);
    }
@@ -208,29 +224,31 @@ private:
     */
    [[nodiscard]]
    auto advance() {
-      __mi avx_a = S::_mm_load_si(reinterpret_cast<const __mi*>(a_states.data()));
-      __mi avx_b = S::_mm_load_si(reinterpret_cast<const __mi*>(b_states.data()));
-      __mi mult = S::_mm_set1_epi32(0x9E3779BB);
-      __mi result = S::_mm_mullo_epi32(avx_a, mult);
+      __mi avx_a = _mm::load_si(reinterpret_cast<const __mi*>(a_states.data()));
+      __mi avx_b = _mm::load_si(reinterpret_cast<const __mi*>(b_states.data()));
+      __mi mult = _mm::set1_epi32(0x9E3779BB);
+      __mi result = _mm::mullo_epi32(avx_a, mult);
       // __mi result = avx_a;
 
-      avx_b = S::_mm_xor_si(avx_a, avx_b);
-      avx_a = rotl(avx_a, 26);
-      avx_a = S::_mm_xor_si(avx_a, avx_b);
-      avx_a = S::_mm_xor_si(avx_a, S::_mm_slli_epi32(avx_b, 9));
-      avx_b = rotl(avx_b, 13);
+      avx_b = _mm::xor_si(avx_a, avx_b);
+      // avx_a = rotl(avx_a, 26);
+      avx_a = _mm::template rol_epi32<26>(avx_a);
+      avx_a = _mm::xor_si(avx_a, avx_b);
+      avx_a = _mm::xor_si(avx_a, _mm::slli_epi32(avx_b, 9));
+      // avx_b = rotl(avx_b, 13);
+      avx_b = _mm::template rol_epi32<13>(avx_b);
       
-      S::_mm_store_si(reinterpret_cast<__mi*>(a_states.data()), avx_a);
-      S::_mm_store_si(reinterpret_cast<__mi*>(b_states.data()), avx_b);
+      _mm::store_si(reinterpret_cast<__mi*>(a_states.data()), avx_a);
+      _mm::store_si(reinterpret_cast<__mi*>(b_states.data()), avx_b);
 
       return result;
    }
 
    [[nodiscard]]
    __mi rotl(__mi x, const int k) {
-      return S::_mm_or_si(
-         S::_mm_slli_epi32(x, k), 
-         S::_mm_srli_epi32(x, 32 - k)
+      return _mm::or_si(
+         _mm::slli_epi32(x, k), 
+         _mm::srli_epi32(x, 32 - k)
       );
    }
 };

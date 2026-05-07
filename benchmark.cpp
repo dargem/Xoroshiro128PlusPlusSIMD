@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
 
     ScalarXoroshiro64Star scalar;
 
-    XoroshiroRNG<InstructionSet::AVX256> simd;
+    XoroshiroRNG<InstructionSet::AVX512> simd;
     constexpr size_t kBatch = decltype(simd)::BATCH_SIZE;
 
     const auto scalarResult = bench("scalar", count, [&] {
