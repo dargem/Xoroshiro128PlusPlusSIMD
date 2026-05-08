@@ -60,11 +60,11 @@ struct InstructionSetTraits<InstructionSet::AVX256> {
    using __m = __m256;
 
    // Integer ops
-   template <int byte_shift> // needs a compile time constant
+   template <int byte_shift>
    static __mi rol_epi32(__mi a) { 
       #if defined (__AVX512F__)
          // this 256 bit register instruction is actually from the AVX512 instruction set
-         return _mm256_rol_epi32(a, bits); 
+         return _mm256_rol_epi32(a, byte_shift); 
       #else
          // if we do not have the AVX512 instruction set default back to our 256 "emulation"
          return or_si(
@@ -87,6 +87,15 @@ struct InstructionSetTraits<InstructionSet::AVX256> {
 
    // Lane ops, SIMD registers are made up of 128 bit lanes
    // crossing lanes is pricy so mixing is done inside these lanes
+   // this operation doesn't actually "exist", this is just a wrapper to rotl a lane
+   template <int byte_shift>
+   static __mi brol_epi128(__mi a) {
+      return xor_si(
+         bslli_epi128<byte_shift>(a), 
+         bsrli_epi128<128/8-byte_shift>(a)
+      );
+   }
+
    template <int byte_shift>
    static __mi bsrli_epi128(__mi a) { return _mm256_bsrli_epi128(a, byte_shift); }
    template <int byte_shift>
@@ -107,8 +116,8 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
    using __m = __m512;
 
    // Integer ops
-   template <int b> // needs a compile time constant
-   static __mi rol_epi32(__mi a) { return _mm512_rol_epi32(a, b); }
+   template <int byte_shift> // needs a compile time constant
+   static __mi rol_epi32(__mi a) { return _mm512_rol_epi32(a, byte_shift); }
    static __mi srli_epi32(__mi a, int bits) { return _mm512_srli_epi32(a, bits); }
    static __mi slli_epi32(__mi a, int bits) { return _mm512_slli_epi32(a, bits); }
 
@@ -123,6 +132,17 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
 
    // Lane ops, SIMD registers are made up of 128 bit lanes
    // crossing lanes is pricy so mixing is done inside these lanes
+
+   // this operation doesn't actually "exist", this is just a wrapper to rotl a lane
+   template <int byte_shift>
+   static __mi brol_epi128(__mi a) {
+      return xor_si(
+         bslli_epi128<byte_shift>(a), 
+         bsrli_epi128<128/8-byte_shift>(a)
+      );
+   }
+
+
    template <int byte_shift>
    static __mi bsrli_epi128(__mi a) { return _mm512_bsrli_epi128(a, byte_shift); }
    template <int byte_shift>
@@ -242,14 +262,11 @@ private:
       __mi avx_b = _mm::load_si(reinterpret_cast<const __mi*>(b_states.data()));
       __mi mult = _mm::set1_epi32(0x9E3779BB);
       __mi result = _mm::mullo_epi32(avx_a, mult);
-      // __mi result = avx_a;
 
       avx_b = _mm::xor_si(avx_a, avx_b);
-      // avx_a = rotl(avx_a, 26);
       avx_a = _mm::template rol_epi32<26>(avx_a);
       avx_a = _mm::xor_si(avx_a, avx_b);
       avx_a = _mm::xor_si(avx_a, _mm::slli_epi32(avx_b, 9));
-      // avx_b = rotl(avx_b, 13);
       avx_b = _mm::template rol_epi32<13>(avx_b);
       
       _mm::store_si(reinterpret_cast<__mi*>(a_states.data()), avx_a);
