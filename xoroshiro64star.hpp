@@ -44,12 +44,70 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 #include <limits>
 
 enum class InstructionSet {
-   AVX256,
+   AVX128, // AKA AVX
+   AVX256, // AKA AVX2
    AVX512
 };
 
 template <InstructionSet I>
 struct InstructionSetTraits;
+
+template<>
+struct InstructionSetTraits<InstructionSet::AVX128> {
+   static constexpr size_t bits = 128;
+   static constexpr size_t bytes = bits / 8;
+
+   using __mi = __m128i;
+   using __m = __m128;
+
+   // Integer ops
+   template <int byte_shift>
+   static __mi rol_epi32(__mi a) { 
+      #if defined (__AVX512F__)
+         // this 128 bit register instruction is actually from the AVX512 instruction set
+         return _mm_rol_epi32(a, byte_shift); 
+      #else
+         // if we do not have the AVX512 instruction set default back to our 128 "emulation"
+         return or_si(
+            slli_epi32(a, byte_shift), 
+            srli_epi32(a, 32 - byte_shift)
+         );
+      #endif
+   }
+
+   static __mi srli_epi32(__mi a, int bits) { return _mm_srli_epi32(a, bits); }
+   static __mi slli_epi32(__mi a, int bits) { return _mm_slli_epi32(a, bits); }
+   static __mi set1_epi32(int val) { return _mm_set1_epi32(val); }
+   static __mi mullo_epi32(__mi a, __mi b) { return _mm_mullo_epi32(a, b); }
+
+   // Bit ops
+   static __mi xor_si(__mi a, __mi b) { return _mm_xor_si128(a, b); }
+   static __mi or_si(__mi a, __mi b) { return _mm_or_si128(a, b); }
+   static void store_si(__mi* mem_addr, __mi source) { _mm_store_si128(mem_addr, source); }
+   static __mi load_si(__mi const* mem_addr) { return _mm_load_si128(mem_addr); }
+
+   // Lane ops, SIMD registers are made up of 128 bit lanes
+   // crossing lanes is pricy so mixing is done inside these lanes
+   // this operation doesn't actually "exist", this is just a wrapper to rotl a lane
+   template <int byte_shift>
+   static __mi brol_epi128(__mi a) {
+      return xor_si(
+         bslli_epi128<byte_shift>(a), 
+         bsrli_epi128<128/8-byte_shift>(a)
+      );
+   }
+
+   // epi128 is same as si128 since lanes are just 128 bit
+   template <int byte_shift>
+   static __mi bsrli_epi128(__mi a) { return _mm_bsrli_si128(a, byte_shift); }
+   template <int byte_shift>
+   static __mi bslli_epi128(__mi a) { return _mm_bslli_si128(a, byte_shift); }   
+
+   // Float ops
+   static __m sub_ps(__m a, __m b) { return _mm_sub_ps(a, b); }
+   static __m set1_ps(float val) { return _mm_set1_ps(val); }
+   static __m castsi_ps(__mi a) { return _mm_castsi128_ps(a); }
+};
 
 template<>
 struct InstructionSetTraits<InstructionSet::AVX256> {
@@ -153,6 +211,8 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
    static __m set1_ps(float val) { return _mm512_set1_ps(val); }
    static __m castsi_ps(__mi a) { return _mm512_castsi512_ps(a); }
 };
+
+
 
 static inline uint64_t splitmix64_next(uint64_t& x)
 {
