@@ -251,8 +251,6 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
    static __m castsi_ps(__mi a) { return _mm512_castsi512_ps(a); }
 };
 
-
-
 static inline uint64_t splitmix64_next(uint64_t& x)
 {
    // http://xorshift.di.unimi.it/splitmix64.c
@@ -408,3 +406,36 @@ private:
       );
    }
 };
+
+#include <cstdint>
+
+template <InstructionSet I>
+class alignas(InstructionSetTraits<I>::bytes) WyHash64SIMD {
+private:
+   using _mm = InstructionSetTraits<I>;
+   using __m = _mm::__m;
+   using __mi = _mm::__mi;
+   constexpr static size_t REGISTER_BYTE_SIZE = _mm::bytes;
+public:
+   constexpr static size_t ELEMENT_SIZE = sizeof(float);
+   constexpr static size_t BATCH_SIZE = REGISTER_BYTE_SIZE / ELEMENT_SIZE;
+
+
+
+
+private:
+   alignas(REGISTER_BYTE_SIZE) std::array<uint64_t, REGISTER_BYTE_SIZE / 8> state;
+};
+
+uint64_t wyhash64_x; 
+
+
+uint64_t wyhash64() {
+  wyhash64_x += 0x60bee2bee120fc15;
+  __uint128_t tmp;
+  tmp = (__uint128_t) wyhash64_x * 0xa3b195354a39b70d;
+  uint64_t m1 = (tmp >> 64) ^ tmp;
+  tmp = (__uint128_t)m1 * 0x1b03738712fad5c9;
+  uint64_t m2 = (tmp >> 64) ^ tmp;
+  return m2;
+}
