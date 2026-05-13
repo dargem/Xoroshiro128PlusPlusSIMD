@@ -44,6 +44,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 #include <limits>
 
 enum class InstructionSet {
+   NONE,
    AVX128, // AKA AVX
    AVX256, // AKA AVX2
    AVX512
@@ -52,6 +53,7 @@ enum class InstructionSet {
 template <InstructionSet I>
 struct InstructionSetTraits;
 
+#ifdef __AVX__
 template<>
 struct InstructionSetTraits<InstructionSet::AVX128> {
    static constexpr size_t bits = 128;
@@ -95,6 +97,8 @@ struct InstructionSetTraits<InstructionSet::AVX128> {
    static __mi mullo_epi32(__mi a, __mi b) { return _mm_mullo_epi32(a, b); }
    static __mi srli_epi64(__mi a, int bits) { return _mm_srli_epi64(a, bits); }
    static __mi slli_epi64(__mi a, int bits) { return _mm_slli_epi64(a, bits); }
+   static __mi add_epi64(__mi a, __mi b) { return _mm_add_epi64(a, b); }
+   static __mi set1_epi64(uint64_t a) { return _mm_set1_epi64x(a); }
 
    // Bit ops
    static __mi xor_si(__mi a, __mi b) { return _mm_xor_si128(a, b); }
@@ -124,7 +128,9 @@ struct InstructionSetTraits<InstructionSet::AVX128> {
    static __m set1_ps(float val) { return _mm_set1_ps(val); }
    static __m castsi_ps(__mi a) { return _mm_castsi128_ps(a); }
 };
+#endif
 
+#ifdef __AVX2__
 template<>
 struct InstructionSetTraits<InstructionSet::AVX256> {
    static constexpr size_t bits = 256;
@@ -168,6 +174,8 @@ struct InstructionSetTraits<InstructionSet::AVX256> {
    static __mi mullo_epi32(__mi a, __mi b) { return _mm256_mullo_epi32(a, b); }
    static __mi srli_epi64(__mi a, int bits) { return _mm256_srli_epi64(a, bits); }
    static __mi slli_epi64(__mi a, int bits) { return _mm256_slli_epi64(a, bits); }
+   static __mi add_epi64(__mi a, __mi b) { return _mm256_add_epi64(a, b); }
+   static __mi set1_epi64(uint64_t a) { return _mm256_set1_epi64x(a); }
 
    // Bit ops
    static __mi xor_si(__mi a, __mi b) { return _mm256_xor_si256(a, b); }
@@ -196,7 +204,10 @@ struct InstructionSetTraits<InstructionSet::AVX256> {
    static __m set1_ps(float val) { return _mm256_set1_ps(val); }
    static __m castsi_ps(__mi a) { return _mm256_castsi256_ps(a); }
 };
+#endif
 
+
+#ifdef __AVX512F__
 template<>
 struct InstructionSetTraits<InstructionSet::AVX512> {
    static constexpr size_t bits = 512;
@@ -214,12 +225,12 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
 
    static __mi srli_epi32(__mi a, int bits) { return _mm512_srli_epi32(a, bits); }
    static __mi slli_epi32(__mi a, int bits) { return _mm512_slli_epi32(a, bits); }
-
    static __mi set1_epi32(int val) { return _mm512_set1_epi32(val); }
    static __mi mullo_epi32(__mi a, __mi b) { return _mm512_mullo_epi32(a, b); }
-
    static __mi srli_epi64(__mi a, int bits) { return _mm512_srli_epi64(a, bits); }
    static __mi slli_epi64(__mi a, int bits) { return _mm512_slli_epi64(a, bits); }
+   static __mi add_epi64(__mi a, __mi b) { return _mm512_add_epi64(a, b); }
+   static __mi set1_epi64(uint64_t a) { return _mm512_set1_epi64(a); }
 
    // Bit ops
    static __mi xor_si(__mi a, __mi b) { return _mm512_xor_si512(a, b); }
@@ -250,6 +261,7 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
    static __m set1_ps(float val) { return _mm512_set1_ps(val); }
    static __m castsi_ps(__mi a) { return _mm512_castsi512_ps(a); }
 };
+#endif
 
 static inline uint64_t splitmix64_next(uint64_t& x)
 {
@@ -260,10 +272,23 @@ static inline uint64_t splitmix64_next(uint64_t& x)
    return z ^ (z >> 31);
 }
 
-template <InstructionSet I>
-class alignas(InstructionSetTraits<I>::bytes) XoroshiroRNG {
+#ifdef __AVX512F__
+#define SIMD_INSTRUCTION_SET InstructionSet::AVX512   
+#elif defined (__AVX2__)
+#define SIMD_INSTRUCTION_SET InstructionSet::AVX256
+#elif defined (__AVX__)
+#define SIMD_INSTRUCTION_SET InstructionSet::AVX128
+#else
+#warning Being ran on a CPU that does not support any AVX instruction sets. \
+Or may be compiled without targeting your architecture (flags march native or specify mavx). \
+Expect no benefits from vectorization.
+#define SIMD_INSTRUCTION_SET InstructionSet::NONE
+#endif
+
+
+class alignas(InstructionSetTraits<SIMD_INSTRUCTION_SET>::bytes) XoroshiroRNG {
 private:
-   using _mm = InstructionSetTraits<I>;
+   using _mm = InstructionSetTraits<SIMD_INSTRUCTION_SET>;
    using __m = _mm::__m;
    using __mi = _mm::__mi;
    constexpr static size_t REGISTER_BYTE_SIZE = _mm::bytes;
@@ -289,7 +314,7 @@ public:
     * @return std::array<float, BATCH_SIZE> 
     */
    [[nodiscard]]
-   std::array<float, BATCH_SIZE> getBatchFloats() {
+   std::array<float, BATCH_SIZE> get_batch_floats() {
 
       __mi result = cross_advance();
 
@@ -314,33 +339,9 @@ public:
    }
 
    [[nodiscard]]
-   std::array<uint32_t, BATCH_SIZE> getBatchInts() {
+   std::array<uint32_t, BATCH_SIZE> get_batch_ints() {
 
       return std::bit_cast<std::array<uint32_t, BATCH_SIZE>>(cross_advance());   
-   }
-
-   /**
-    * @brief generate a batch of 8 floats
-    * This is a wrapper around getFloatBatch() allowing a more explicit name at the callsite.
-    * If you are not generating 8 floats in a batch this will compile error to warn you.
-    * You are likely not using AVX256 which is the problem if you get a warning.
-    * @return std::array<float, 8> container holding the random numbers
-    */
-   [[nodiscard]]
-   std::array<float, 8> get_eight_floats() requires (BATCH_SIZE == 8) {
-      return getBatchFloats();
-   }
-
-   /**
-    * @brief generate a batch of 16 floats
-    * This is a wrapper around getFloatBatch() allowing a more explicit name at the callsite.
-    * If you are not generating 16 floats in a batch this will compile error to warn you.
-    * You are likely not using AVX512 which is the problem if you get a warning.
-    * @return std::array<float, 16> container holding the random numbers
-    */
-    [[nodiscard]]
-   std::array<float, 16> get_sixteen_floats() requires (BATCH_SIZE == 16) {
-      return getBatchFloats();
    }
 
 private:
@@ -379,7 +380,7 @@ private:
     * @return __m(register_size)i of result register
     */
    [[nodiscard]] 
-   auto cross_advance() {
+   __mi cross_advance() {
       __mi avx_a = _mm::load_si(reinterpret_cast<const __mi*>(a_states.data()));
       __mi avx_b = _mm::load_si(reinterpret_cast<const __mi*>(b_states.data()));
       __mi mult = _mm::set1_epi32(0x9E3779BB);
@@ -406,36 +407,3 @@ private:
       );
    }
 };
-
-#include <cstdint>
-
-template <InstructionSet I>
-class alignas(InstructionSetTraits<I>::bytes) WyHash64SIMD {
-private:
-   using _mm = InstructionSetTraits<I>;
-   using __m = _mm::__m;
-   using __mi = _mm::__mi;
-   constexpr static size_t REGISTER_BYTE_SIZE = _mm::bytes;
-public:
-   constexpr static size_t ELEMENT_SIZE = sizeof(float);
-   constexpr static size_t BATCH_SIZE = REGISTER_BYTE_SIZE / ELEMENT_SIZE;
-
-
-
-
-private:
-   alignas(REGISTER_BYTE_SIZE) std::array<uint64_t, REGISTER_BYTE_SIZE / 8> state;
-};
-
-uint64_t wyhash64_x; 
-
-
-uint64_t wyhash64() {
-  wyhash64_x += 0x60bee2bee120fc15;
-  __uint128_t tmp;
-  tmp = (__uint128_t) wyhash64_x * 0xa3b195354a39b70d;
-  uint64_t m1 = (tmp >> 64) ^ tmp;
-  tmp = (__uint128_t)m1 * 0x1b03738712fad5c9;
-  uint64_t m2 = (tmp >> 64) ^ tmp;
-  return m2;
-}

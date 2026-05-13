@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
 
     ScalarXoroshiro64Star scalar;
 
-    XoroshiroRNG<InstructionSet::AVX128> simd;
+    XoroshiroRNG simd;
     constexpr size_t kBatch = decltype(simd)::BATCH_SIZE;
 
     const auto scalarResult = bench("scalar", count, [&] {
@@ -98,14 +98,14 @@ int main(int argc, char** argv) {
         const uint64_t remainder = count % kBatch;
 
         for (uint64_t i = 0; i < fullBatches; ++i) {
-            const auto v = simd.getBatchInts();
+            const auto v = simd.get_batch_ints();
             for (size_t j = 0; j < v.size(); ++j) {
                 sum += v[j];
             }
         }
 
         if (remainder != 0) {
-            const auto v = simd.getBatchInts();
+            const auto v = simd.get_batch_ints();
             for (uint64_t j = 0; j < remainder; ++j) {
                 sum += v[static_cast<size_t>(j)];
             }
