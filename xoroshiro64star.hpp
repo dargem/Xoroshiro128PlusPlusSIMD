@@ -41,6 +41,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 #include <cassert>
 #include <immintrin.h>
 #include <cstring>
+#include <type_traits>
 
 enum class InstructionSet {
    NONE,
@@ -279,22 +280,22 @@ static inline uint64_t splitmix64_next(uint64_t& x) {
 #define SIMD_INSTRUCTION_SET InstructionSet::AVX128
 #else
 #warning Being ran on a CPU that does not support any AVX instruction sets. \
-Or may be compiled without targeting your architecture (flags march native or specify mavx). \
+Or it may have been compiled without targeting your architecture (flags march native or specify mavx). \
 Expect no benefits from vectorization.
 #define SIMD_INSTRUCTION_SET InstructionSet::NONE
 #endif
 
 
 class alignas(InstructionSetTraits<SIMD_INSTRUCTION_SET>::bytes) XoroshiroRNG {
-private:
+public:
    using _mm = InstructionSetTraits<SIMD_INSTRUCTION_SET>;
    using __m = _mm::__m;   // float
    using __mi = _mm::__mi; // int
-public:
+
    constexpr static size_t REGISTER_BYTE_SIZE = _mm::bytes;
    constexpr static size_t ELEMENT_SIZE = sizeof(float);
    constexpr static size_t BATCH_SIZE = REGISTER_BYTE_SIZE / ELEMENT_SIZE;
-
+   static constexpr InstructionSet INSTRUCTION_SET = SIMD_INSTRUCTION_SET;
    
    XoroshiroRNG(uint32_t seed = 0xcafef00dU) {
 
@@ -316,9 +317,20 @@ public:
    [[nodiscard]]
    std::array<float, BATCH_SIZE> get_batch_floats() {
 
-      __mi result = cross_advance();
+      __mi result = advance();
 
       return std::bit_cast<std::array<float, BATCH_SIZE>>(float_convert(result));
+   }
+
+   /**
+    * @brief Get a batch of floats in raw simd register
+    * The number of float is the SIMD register size in bits / 32. 
+    * AVX512 uses 512 bit registers, so batch size is 512 / 32 = 16.
+    * @return __m, which is a SIMD float register
+    */
+   [[nodiscard]]
+   __m get_batch_floats_simd() {
+      return float_convert(advance());   
    }
 
    /**
@@ -329,9 +341,20 @@ public:
     */
    [[nodiscard]]
    std::array<uint32_t, BATCH_SIZE> get_batch_uint32() {
-      return std::bit_cast<std::array<uint32_t, BATCH_SIZE>>(cross_advance());   
+      return std::bit_cast<std::array<uint32_t, BATCH_SIZE>>(advance());   
    }
-   
+
+   /**
+    * @brief Get a batch of uint32_t's in raw simd register
+    * The number of ints is the SIMD register size in bits / 32. 
+    * AVX512 uses 512 bit registers, so batch size is 512 / 32 = 16.
+    * @return __mi, which is a SIMD integer register
+    */
+   [[nodiscard]]
+   __mi get_batch_uint32_simd() {
+      return advance();   
+   }
+
    /**
     * @brief Fill an array with uint32_t's
     * 
@@ -350,12 +373,12 @@ public:
 
       // Fill all elements up to the SIMD registers boundary
       for (; dst < aligned_end; dst += BATCH_SIZE) {
-         __mi result = cross_advance();
+         __mi result = advance();
          _mm::store_si(reinterpret_cast<__mi*>(dst), result);
       }
 
       // Now we have to fill the remainders
-      __mi buffer = cross_advance();
+      __mi buffer = advance();
       std::memcpy(dst, &buffer, remainder_bytes);
    }
    
@@ -377,13 +400,13 @@ public:
 
       // Fill all elements up to the SIMD registers boundary
       for (; dst < aligned_end; dst += BATCH_SIZE) {
-         __mi result = cross_advance();
+         __mi result = advance();
          __m floats = float_convert(result);
          _mm::store_si(reinterpret_cast<__mi*>(dst), reinterpret_cast<__mi>(floats));
       }
 
       // Now we have to fill the remainders
-      __m buffer = float_convert(cross_advance());
+      __m buffer = float_convert(advance());
       std::memcpy(dst, &buffer, remainder_bytes);
    }
 
@@ -397,45 +420,30 @@ private:
     * 
     * @return __m(register_size)i of result register
     */
+   template <bool LaneWeaving = true>
    [[nodiscard]]
-   auto advance() {
+   __mi advance() {
       __mi avx_a = _mm::load_si(reinterpret_cast<const __mi*>(a_states.data()));
       __mi avx_b = _mm::load_si(reinterpret_cast<const __mi*>(b_states.data()));
       __mi mult = _mm::set1_epi32(0x9E3779BB);
       __mi result = _mm::mullo_epi32(avx_a, mult);
 
-      avx_b = _mm::xor_si(avx_a, avx_b);
-      avx_a = _mm::template rol_epi32<26>(avx_a);
-      avx_a = _mm::xor_si(avx_a, avx_b);
-      avx_a = _mm::xor_si(avx_a, _mm::slli_epi32(avx_b, 9));
-      avx_b = _mm::template rol_epi32<13>(avx_b);
-      
-      _mm::store_si(reinterpret_cast<__mi*>(a_states.data()), avx_a);
-      _mm::store_si(reinterpret_cast<__mi*>(b_states.data()), avx_b);
-
-      return result;
-   }
-
-   /**
-    * @brief Advances each nested RNG one state forward.
-    * This is a modified version that uses light inter rng mixing
-    * 
-    * @return __m(register_size)i of result register
-    */
-   [[nodiscard]] 
-   __mi cross_advance() {
-      __mi avx_a = _mm::load_si(reinterpret_cast<const __mi*>(a_states.data()));
-      __mi avx_b = _mm::load_si(reinterpret_cast<const __mi*>(b_states.data()));
-      __mi mult = _mm::set1_epi32(0x9E3779BB);
-      __mi result = _mm::mullo_epi32(avx_a, mult);
-
-      // Interprets the 32 bit RNG "lanes" as 64 bit ones for light mixing
-      // This results in it being able to fully pass the normal Crush test from TestU01
-      avx_b = _mm::xor_si(avx_a, avx_b);
-      avx_a = _mm::template rol_epi64<26>(avx_a);
-      avx_a = _mm::xor_si(avx_a, avx_b);
-      avx_a = _mm::xor_si(avx_a, _mm::slli_epi64(avx_b, 9));
-      avx_b = _mm::template rol_epi64<13>(avx_b);
+      if constexpr (LaneWeaving) {
+         // Interprets the 32 bit RNG "lanes" as 64 bit ones for additional mixing
+         // This results in it being able to fully pass the normal Crush test from TestU01
+         avx_b = _mm::xor_si(avx_a, avx_b);
+         avx_a = _mm::template rol_epi64<26>(avx_a);
+         avx_a = _mm::xor_si(avx_a, avx_b);
+         avx_a = _mm::xor_si(avx_a, _mm::slli_epi64(avx_b, 9));
+         avx_b = _mm::template rol_epi64<13>(avx_b);
+      } else {
+         // This is the original version, every lane is independent
+         avx_b = _mm::xor_si(avx_a, avx_b);
+         avx_a = _mm::template rol_epi32<26>(avx_a);
+         avx_a = _mm::xor_si(avx_a, avx_b);
+         avx_a = _mm::xor_si(avx_a, _mm::slli_epi32(avx_b, 9));
+         avx_b = _mm::template rol_epi32<13>(avx_b);
+      }
       
       _mm::store_si(reinterpret_cast<__mi*>(a_states.data()), avx_a);
       _mm::store_si(reinterpret_cast<__mi*>(b_states.data()), avx_b);

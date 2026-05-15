@@ -1,5 +1,4 @@
 #include <array>
-#include <bit>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -83,35 +82,59 @@ int main(int argc, char** argv) {
     XoroshiroRNG simd;
     constexpr size_t kBatch = decltype(simd)::BATCH_SIZE;
 
-    const auto scalarResult = bench("scalar", count, [&] {
-        uint64_t sum = 0;
+    const auto scalarResult = bench("scalar(xor)", count, [&] {
+        uint64_t checksum = 0;
         for (uint64_t i = 0; i < count; ++i) {
-            sum += scalar.next_u32();
+            checksum ^= static_cast<uint64_t>(scalar.next_u32());
         }
-        return sum;
+        return checksum;
     });
 
-    const auto simdResult = bench("simd(batch)", count, [&] {
-        uint64_t sum = 0;
+    const auto simdResult = bench("simd(xor)", count, [&] {
+        uint64_t checksum = 0;
 
         const uint64_t fullBatches = count / kBatch;
         const uint64_t remainder = count % kBatch;
 
+#if defined(__AVX512F__)
+        __m512i acc = _mm512_setzero_si512();
+        for (uint64_t i = 0; i < fullBatches; ++i) {
+            acc = _mm512_xor_si512(acc, simd.get_batch_uint32_simd());
+        }
+        alignas(64) std::array<uint32_t, 16> tmp{};
+        _mm512_store_si512(reinterpret_cast<void*>(tmp.data()), acc);
+        for (uint32_t x : tmp) checksum ^= static_cast<uint64_t>(x);
+#elif defined(__AVX2__)
+        __m256i acc = _mm256_setzero_si256();
+        for (uint64_t i = 0; i < fullBatches; ++i) {
+            acc = _mm256_xor_si256(acc, simd.get_batch_uint32_simd());
+        }
+        alignas(32) std::array<uint32_t, 8> tmp{};
+        _mm256_store_si256(reinterpret_cast<__m256i*>(tmp.data()), acc);
+        for (uint32_t x : tmp) checksum ^= static_cast<uint64_t>(x);
+#elif defined(__AVX__)
+        __m128i acc = _mm_setzero_si128();
+        for (uint64_t i = 0; i < fullBatches; ++i) {
+            acc = _mm_xor_si128(acc, simd.get_batch_uint32_simd());
+        }
+        alignas(16) std::array<uint32_t, 4> tmp{};
+        _mm_store_si128(reinterpret_cast<__m128i*>(tmp.data()), acc);
+        for (uint32_t x : tmp) checksum ^= static_cast<uint64_t>(x);
+#else
         for (uint64_t i = 0; i < fullBatches; ++i) {
             const auto v = simd.get_batch_uint32();
-            for (size_t j = 0; j < v.size(); ++j) {
-                sum += v[j];
-            }
+            for (uint32_t x : v) checksum ^= static_cast<uint64_t>(x);
         }
+#endif
 
         if (remainder != 0) {
             const auto v = simd.get_batch_uint32();
             for (uint64_t j = 0; j < remainder; ++j) {
-                sum += v[static_cast<size_t>(j)];
+                checksum ^= static_cast<uint64_t>(v[static_cast<size_t>(j)]);
             }
         }
 
-        return sum;
+        return checksum;
     });
 
     // alignas(decltype(simd)::REGISTER_BYTE_SIZE) std::array<float, 10> floats{};
