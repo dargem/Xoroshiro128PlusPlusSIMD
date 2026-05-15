@@ -41,7 +41,7 @@ IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 #include <cassert>
 #include <immintrin.h>
 #include <cstring>
-#include <type_traits>
+#include <bit>
 
 enum class InstructionSet {
    NONE,
@@ -52,6 +52,48 @@ enum class InstructionSet {
 
 template <InstructionSet I>
 struct InstructionSetTraits;
+
+template<>
+struct InstructionSetTraits<InstructionSet::NONE> {
+   // Here we're using just normal registers which are 64 bits yes, but 
+   // we're just using this for 4 byte data so we treat them as 32 bit for this. 
+   // SWAR could be used but thats outside this projects scope.
+   static constexpr size_t bits = 32;
+   static constexpr size_t bytes = bits / 8;
+
+   using __mi = uint32_t;
+   using __m = float;
+
+   // Integer ops
+   template <int bit_shift>
+   static __mi rol_epi32(__mi a) { 
+      return (a << bit_shift) | (a >> (32 - bit_shift));
+   }
+
+   template <int bit_shift>
+   static __mi rol_epi64(__mi a) { 
+      return rol_epi32<bit_shift>(a); // We just fall back to 32 bit
+   }
+
+   static __mi srli_epi32(__mi a, int bits) { return a >> bits; }
+   static __mi slli_epi32(__mi a, int bits) { return a << bits; }
+   static __mi set1_epi32(int val) { return val; }
+   static __mi mullo_epi32(__mi a, __mi b) { return a * b; }
+
+   // Scalar fallback, treat "epi64" ops as operating on the scalar value
+   static __mi slli_epi64(__mi a, int bits) { return slli_epi32(a, bits); }
+
+   // Bit ops
+   static __mi xor_si(__mi a, __mi b) { return a ^ b; }
+   static __mi or_si(__mi a, __mi b) { return a | b; }
+   static void store_si(__mi* mem_addr, __mi source) { *mem_addr = source; }
+   static __mi load_si(__mi const* mem_addr) { return *mem_addr; }
+
+   // Float ops
+   static __m sub_ps(__m a, __m b) { return a - b; }
+   static __m set1_ps(float val) { return val; }
+   static __m castsi_ps(__mi a) { return std::bit_cast<__m>(a); }
+};
 
 #ifdef __AVX__
 template<>
@@ -105,23 +147,6 @@ struct InstructionSetTraits<InstructionSet::AVX128> {
    static __mi or_si(__mi a, __mi b) { return _mm_or_si128(a, b); }
    static void store_si(__mi* mem_addr, __mi source) { _mm_store_si128(mem_addr, source); }
    static __mi load_si(__mi const* mem_addr) { return _mm_load_si128(mem_addr); }
-
-   // Lane ops, SIMD registers are made up of 128 bit lanes
-   // crossing lanes is pricy so mixing is done inside these lanes
-   // this operation doesn't actually "exist", this is just a wrapper to rotl a lane
-   template <int byte_shift>
-   static __mi brol_epi128(__mi a) {
-      return xor_si(
-         bslli_epi128<byte_shift>(a), 
-         bsrli_epi128<128/8-byte_shift>(a)
-      );
-   }
-
-   // epi128 is same as si128 since lanes are just 128 bit
-   template <int byte_shift>
-   static __mi bsrli_epi128(__mi a) { return _mm_bsrli_si128(a, byte_shift); }
-   template <int byte_shift>
-   static __mi bslli_epi128(__mi a) { return _mm_bslli_si128(a, byte_shift); }   
 
    // Float ops
    static __m sub_ps(__m a, __m b) { return _mm_sub_ps(a, b); }
@@ -184,22 +209,6 @@ struct InstructionSetTraits<InstructionSet::AVX256> {
    static void store_si(__mi* mem_addr, __mi source) { _mm256_store_si256(mem_addr, source); }
    static __mi load_si(__mi const* mem_addr) { return _mm256_load_si256(mem_addr); }
 
-   // Lane ops, SIMD registers are made up of 128 bit lanes
-   // crossing lanes is pricy so mixing is done inside these lanes
-   // this operation doesn't actually "exist", this is just a wrapper to rotl a lane
-   template <int byte_shift>
-   static __mi brol_epi128(__mi a) {
-      return xor_si(
-         bslli_epi128<byte_shift>(a), 
-         bsrli_epi128<128/8-byte_shift>(a)
-      );
-   }
-
-   template <int byte_shift>
-   static __mi bsrli_epi128(__mi a) { return _mm256_bsrli_epi128(a, byte_shift); }
-   template <int byte_shift>
-   static __mi bslli_epi128(__mi a) { return _mm256_bslli_epi128(a, byte_shift); }   
-
    // Float ops
    static __m sub_ps(__m a, __m b) { return _mm256_sub_ps(a, b); }
    static __m set1_ps(float val) { return _mm256_set1_ps(val); }
@@ -237,25 +246,7 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
    static __mi xor_si(__mi a, __mi b) { return _mm512_xor_si512(a, b); }
    static __mi or_si(__mi a, __mi b) { return _mm512_or_si512(a, b); }
    static void store_si(__mi* mem_addr, __mi source) { _mm512_store_si512(mem_addr, source); }
-   static __mi load_si(const __mi* mem_addr) { return _mm512_load_si512(mem_addr); }
-
-   // Lane ops, SIMD registers are made up of 128 bit lanes
-   // crossing lanes is pricy so mixing is done inside these lanes
-
-   // this operation doesn't actually "exist", this is just a wrapper to rotl a lane
-   template <int byte_shift>
-   static __mi brol_epi128(__mi a) {
-      return xor_si(
-         bslli_epi128<byte_shift>(a), 
-         bsrli_epi128<128/8-byte_shift>(a)
-      );
-   }
-
-
-   template <int byte_shift>
-   static __mi bsrli_epi128(__mi a) { return _mm512_bsrli_epi128(a, byte_shift); }
-   template <int byte_shift>
-   static __mi bslli_epi128(__mi a) { return _mm512_bslli_epi128(a, byte_shift); }   
+   static __mi load_si(const __mi* mem_addr) { return _mm512_load_si512(mem_addr); } 
 
    // Float ops
    static __m sub_ps(__m a, __m b) { return _mm512_sub_ps(a, b); }
@@ -402,7 +393,7 @@ public:
       for (; dst < aligned_end; dst += BATCH_SIZE) {
          __mi result = advance();
          __m floats = float_convert(result);
-         _mm::store_si(reinterpret_cast<__mi*>(dst), reinterpret_cast<__mi>(floats));
+         _mm::store_si(reinterpret_cast<__mi*>(dst), (__mi)(floats));
       }
 
       // Now we have to fill the remainders
@@ -420,7 +411,7 @@ private:
     * 
     * @return __m(register_size)i of result register
     */
-   template <bool LaneWeaving = true>
+   template <bool LaneWeaving = false>
    [[nodiscard]]
    __mi advance() {
       __mi avx_a = _mm::load_si(reinterpret_cast<const __mi*>(a_states.data()));
