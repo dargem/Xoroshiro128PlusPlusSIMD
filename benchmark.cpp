@@ -42,7 +42,7 @@ static uint64_t parse_u64_or(const char* s, uint64_t fallback) {
 }
 
 struct BenchResult {
-    uint64_t sum = 0;
+    uint64_t checksum = 0;
     double seconds = 0.0;
     uint64_t count = 0;
 };
@@ -52,10 +52,10 @@ BenchResult bench(std::string_view name, uint64_t count, F&& f) {
     volatile uint64_t sink = 0;
 
     const auto start = Clock::now();
-    const uint64_t sum = f();
+    const uint64_t checksum = f();
     const auto end = Clock::now();
 
-    sink ^= sum;
+    sink ^= checksum;
 
     const std::chrono::duration<double> elapsed = end - start;
     const double seconds = elapsed.count();
@@ -63,10 +63,10 @@ BenchResult bench(std::string_view name, uint64_t count, F&& f) {
     std::cout << std::left << std::setw(18) << name << ": "
               << std::right << std::fixed << std::setprecision(6) << seconds << " s"
               << "  (" << std::setprecision(2) << (static_cast<double>(count) / seconds / 1e6) << " M u32/s)"
-              << "  sum=" << sum
+              << "  checksum=" << checksum
               << "\n";
 
-    return BenchResult{.sum = static_cast<uint64_t>(sink), .seconds = seconds, .count = count};
+    return BenchResult{.checksum = static_cast<uint64_t>(sink), .seconds = seconds, .count = count};
 }
 
 } // namespace
