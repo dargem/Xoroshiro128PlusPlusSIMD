@@ -163,25 +163,27 @@ int main(int argc, char** argv) {
         return checksum;
     };
 
-    constexpr size_t rounds = 10;
-    bench(NUM_XOR, std::array<std::string_view, 2>{"scalar(xor)", "simd(xor)"}, rounds, scalarXOR, simdXOR);
-    // alignas(XoroshiroRNG::REGISTER_BYTE_SIZE) std::array<uint32_t, NUM_ARRAY> arr{};
-    // arr.fill(0); // Make sure all the memory is mapped before filling
-    // asm volatile("" ::: "memory");
+    constexpr size_t xor_rounds = 30;
+    bench(NUM_XOR, std::array<std::string_view, 2>{"scalar(xor)", "simd(xor)"}, xor_rounds, scalarXOR, simdXOR);
 
+    alignas(XoroshiroRNG::REGISTER_BYTE_SIZE) std::array<uint32_t, NUM_ARRAY> arr{};
+    arr.fill(0); // Make sure all the memory is mapped before filling
+    asm volatile("" ::: "memory");
 
+    auto scalarFill = [&] {
+        for (size_t i{}; i < NUM_ARRAY; ++i) {
+            arr[i] = scalar.next_u32();
+        }
+        return 0;
+    };
 
-    // bench("scalar(fill)", NUM_ARRAY, [&]{
-    //     for (size_t i{}; i < NUM_ARRAY; ++i) {
-    //         arr[i] = scalar.next_u32();
-    //     }
-    //     return 0;
-    // });
+    auto simdFill = [&]{
+        simd.fill_aligned_uint32(arr.data(), NUM_ARRAY);
+        return 0;
+    };
 
-    // bench("simd(fill)", NUM_ARRAY, [&]{
-    //     simd.fill_aligned_uint32(arr.data(), NUM_ARRAY);
-    //     return 0;
-    // });
+    constexpr size_t fill_rounds = 100;
+    bench(NUM_ARRAY, std::array<std::string_view, 2>{"scalar(fill)", "simd(fill)"}, fill_rounds, scalarFill, simdFill);
 
     return 0;
 }
