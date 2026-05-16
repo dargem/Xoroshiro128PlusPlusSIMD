@@ -415,7 +415,7 @@ private:
     * 
     * @return __m(register_size)i of result register
     */
-   template <bool LaneWeaving = false>
+   template <bool LaneWeaving = true>
    [[nodiscard]]
    __mi advance() {
       __mi avx_a = _mm::load_si(reinterpret_cast<const __mi*>(a_states.data()));
