@@ -368,9 +368,11 @@ public:
          _mm::store_si(reinterpret_cast<__mi*>(dst), result);
       }
 
-      // Now we have to fill the remainders
-      __mi buffer = advance();
-      std::memcpy(dst, &buffer, remainder_bytes);
+      if (remainder_bytes != 0) {
+         // Now we have to fill the remainders if it exists
+         __mi buffer = advance();
+         std::memcpy(dst, &buffer, remainder_bytes);
+      }
    }
    
    /**
@@ -396,9 +398,11 @@ public:
          _mm::store_si(reinterpret_cast<__mi*>(dst), (__mi)(floats));
       }
 
-      // Now we have to fill the remainders
-      __m buffer = float_convert(advance());
-      std::memcpy(dst, &buffer, remainder_bytes);
+      if (remainder_bytes != 0) {
+         // Now we have to fill the remainders if it exists
+         __m buffer = float_convert(advance());
+         std::memcpy(dst, &buffer, remainder_bytes);
+      }
    }
 
 private:

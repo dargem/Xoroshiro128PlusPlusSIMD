@@ -6,17 +6,17 @@ This repo provides:
 - `XoroshiroRNG`: a vectorized generator that advances multiple xoroshiro64\* streams in parallel.
 - Batch APIs returning `std::array<uint32_t, BATCH_SIZE>` or `std::array<float, BATCH_SIZE>`.
 - Fill APIs for writing aligned output directly to memory.
+- Buffer wrapper for sequential 
 
 # Bench Results
 
 ```
-scalar(xor)       : 0.141513 s  (1413.30 M u32/s) // Xoring
-simd(xor)         : 0.015503 s  (12900.54 M u32/s)
-scalar(fill)      : 0.001250 s  (1599.57 M u32/s)
-simd(fill)        : 0.000161 s  (12455.47 M u32/s) // Array filling
+scalar(xor)       : 0.443956 s  (1351.49 M u32/s) // xoring
+simd(xor)         : 0.061447 s  (9764.51 M u32/s) // ~7.2x faster
+scalar(fill)      : 0.126783 s  (1577.49 M u32/s) // array filling
+simd(fill)        : 0.020591 s  (9713.04 M u32/s) // ~6.15x faster
 ```
-
-I note ~9.2x speedup in random number generation, my benchmark was generating numbers and xor-ing them with a checksum. More details below.
+Very large speed improvements, more details on measurement noted at the bottom.
 
 Notes: <br>
 The xoroshiro-family generators like this one are **not** cryptographically secure so don't use it for such.
@@ -79,16 +79,16 @@ int main() {
 
 `benchmark.cpp` compares a scalar xoroshiro64\* loop against the SIMD batch API.
 
-The benchmark noted above was compiled on a AMD Ryzen 7 260 (zen 4 architecture). It only has 256 bit SIMD registers but supports the AVX512 instruction set. It does this by double pumping the 256 bit vector register, so it 2 cycles for an operation but its generally the same speed or faster than 2 separate 256 bit instructions. On a CPU with true 512 bit vector registers the simd version will have a greater advantage, and for a older CPU not support AVX2 the benefit would be less significant. Benchmark was compiled with `g++ -O3 -std=c++20 -mavx512f -flto -funroll-loops -fno-exceptions -fno-rtti -ffast-math -fomit-frame-pointer benchmark.cpp -o benchmark && ./benchmark 200000000`. Surprisingly `-march=native` reduced performance consistently though it was still ~6.8x faster.
+The benchmark noted above was compiled on a AMD Ryzen 7 260 (zen 4 architecture). It only has 256 bit SIMD registers but supports the AVX512 instruction set. It does this by double pumping the 256 bit vector register, so it 2 cycles for an operation but its generally the same speed or faster than 2 separate 256 bit instructions. On a CPU with true 512 bit vector registers the simd version will have a greater advantage, and for a older CPU not support AVX2 the benefit would be less significant. Benchmark was compiled with `g++ -O3 -std=c++20 -mavx512f -flto -funroll-loops -fno-exceptions -fno-rtti -march=native -fomit-frame-pointer benchmark.cpp -o benchmark && ./benchmark`. Surprisingly `-march=native` reduced performance consistently for the xor bench.
 
-Build and run (AVX2 example):
+Build and run example:
 
 ```bash
-g++ -O3 -std=c++20 -mavx2 -march=native -flto -funroll-loops \
-	-fno-exceptions -fno-rtti -ffast-math -fomit-frame-pointer \
+g++ -O3 -std=c++20 -march=native -flto -funroll-loops \
+	-fno-exceptions -fno-rtti -fomit-frame-pointer \
 	benchmark.cpp -o benchmark
 
-./benchmark 200000000
+./benchmark
 ```
 
 To target AVX-512, compile with something like `-mavx512f` (or just `-march=native` to just inform the compiler of your hardware).
