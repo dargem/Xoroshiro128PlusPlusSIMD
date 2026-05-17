@@ -12,11 +12,14 @@ This repo provides:
 ## Bench Results
 
 ```
-scalar(xor)       : 0.429835 s  (1395.89 M u32/s)  // xoring bench
-sequential(xor)   : 0.266961 s  (2247.52 M u32/s)  // ~1.61x faster
-simd(xor)         : 0.059175 s  (10139.46 M u32/s) // ~7.26x faster
-scalar(fill)      : 0.127893 s  (1563.80 M u32/s)  // array bench
-simd(fill)        : 0.019482 s  (10265.81 M u32/s) // ~6.56x faster
+mersenne(xor)     : 1.335189 s  (449.37 M u32/s)   // baseline
+scalar(xor)       : 0.407096 s  (1473.85 M u32/s)  // ~3.28x faster
+sequential(xor)   : 0.263601 s  (2276.17 M u32/s)  // ~5.07x faster
+simd(xor)         : 0.058874 s  (10191.23 M u32/s) // ~22.7x faster
+
+mersenne(fill)    : 0.461094 s  (433.75 M u32/s)   // baseline
+scalar(fill)      : 0.126347 s  (1582.94 M u32/s)  // ~3.65x faster
+simd(fill)        : 0.019802 s  (10099.97 M u32/s) // ~23.3x faster
 ```
 Very large speed improvements especially with the batch api, more details on measurement are at the bottom.
 
@@ -116,11 +119,14 @@ xoroshiro64star.hpp:276:2: warning: #warning Being ran on a CPU that does not su
   276 | #warning Being ran on a CPU that does not support any AVX instruction sets. \
       |  ^~~~~~~
 Benchmark generating
-scalar(xor)       : 0.415005 s  (1445.77 M u32/s)
-sequential(xor)   : 0.421408 s  (1423.80 M u32/s)
-simd(xor)         : 0.412483 s  (1454.61 M u32/s)
-scalar(fill)      : 0.122939 s  (1626.83 M u32/s)
-simd(fill)        : 0.123012 s  (1625.86 M u32/s)
+mersenne(xor)     : 1.593589 s  (376.51 M u32/s)
+scalar(xor)       : 0.405424 s  (1479.93 M u32/s)
+sequential(xor)   : 0.360740 s  (1663.25 M u32/s)
+simd(xor)         : 0.405872 s  (1478.30 M u32/s)
+
+mersenne(fill)    : 0.549555 s  (363.93 M u32/s)
+scalar(fill)      : 0.119372 s  (1675.44 M u32/s)
+simd(fill)        : 0.119353 s  (1675.70 M u32/s)
 ```
 
 ## Credits

@@ -96,6 +96,7 @@ struct InstructionSetTraits<InstructionSet::NONE> {
    static __m sub_ps(__m a, __m b) { return a - b; }
    static __m set1_ps(float val) { return val; }
    static __m castsi_ps(__mi a) { return std::bit_cast<__m>(a); }
+   static void store_ps(float* mem_addr, __m source) { *mem_addr = source; }
 };
 
 #ifdef __AVX__
@@ -155,6 +156,7 @@ struct InstructionSetTraits<InstructionSet::AVX128> {
    static __m sub_ps(__m a, __m b) { return _mm_sub_ps(a, b); }
    static __m set1_ps(float val) { return _mm_set1_ps(val); }
    static __m castsi_ps(__mi a) { return _mm_castsi128_ps(a); }
+   static void store_ps(float* mem_addr, __m source) { _mm_store_ps(mem_addr, source); }
    // static void store_si(__mi* mem_addr, __mi source) { _mm_store_si128(mem_addr, source); }
 };
 #endif
@@ -216,6 +218,7 @@ struct InstructionSetTraits<InstructionSet::AVX256> {
    static __m sub_ps(__m a, __m b) { return _mm256_sub_ps(a, b); }
    static __m set1_ps(float val) { return _mm256_set1_ps(val); }
    static __m castsi_ps(__mi a) { return _mm256_castsi256_ps(a); }
+   static void store_ps(float* mem_addr, __m source) { _mm256_store_ps(mem_addr, source); }
 };
 #endif
 
@@ -255,6 +258,7 @@ struct InstructionSetTraits<InstructionSet::AVX512> {
    static __m sub_ps(__m a, __m b) { return _mm512_sub_ps(a, b); }
    static __m set1_ps(float val) { return _mm512_set1_ps(val); }
    static __m castsi_ps(__mi a) { return _mm512_castsi512_ps(a); }
+   static void store_ps(float* mem_addr, __m source) { _mm512_store_ps(mem_addr, source); }
 };
 #endif
 
@@ -398,11 +402,8 @@ public:
       for (; dst < aligned_end; dst += BATCH_SIZE) {
          __mi result = advance();
          __m floats = float_convert(result);
-         if constexpr (SIMD_INSTRUCTION_SET != InstructionSet::NONE) {
-            _mm::store_si(reinterpret_cast<__mi*>(dst), std::bit_cast<__mi>(floats));
-         } else {
-            *dst = floats; // batch size = 1 so this is fine
-         }
+
+         _mm::store_ps(dst, floats);
       }
 
       if (remainder_bytes != 0) {

@@ -8,6 +8,7 @@
 #include <tuple>
 #include <utility>
 #include "xoroshiro64star.hpp"
+#include <random>
 
 #define NUM_XOR 20000000
 #define NUM_ARRAY 2000000
@@ -96,7 +97,6 @@ void bench(uint64_t count, const std::array<std::string_view, N>& names, size_t 
 } // namespace
 
 int main(int argc, char** argv) {
-    std::cout << "Benchmark generating\n";
 
     // Warm up period
     volatile uint32_t sink{0};
@@ -109,6 +109,9 @@ int main(int argc, char** argv) {
     XoroshiroRNG simd;
 
     SequentialXoroshiroRNG sequential;
+
+    std::mt19937 mersenne(123u);
+    std::uniform_int_distribution<uint32_t> uint_dist{};
 
     constexpr size_t kBatch = decltype(simd)::BATCH_SIZE;
 
@@ -174,8 +177,17 @@ int main(int argc, char** argv) {
         return checksum;
     };
 
+    auto mersenneXOR = [&] {
+        uint64_t checksum = 0;
+        for (uint64_t i = 0; i < NUM_XOR; ++i) {
+            checksum ^= static_cast<uint64_t>(uint_dist(mersenne));
+        }
+        return checksum;
+    };
+
     constexpr size_t xor_rounds = 30;
-    bench(NUM_XOR, std::array<std::string_view, 3>{"scalar(xor)", "sequential(xor)", "simd(xor)"}, xor_rounds, scalarXOR, sequentialXOR, simdXOR);
+    bench(NUM_XOR, std::array<std::string_view, 4>{"mersenne(xor)", "scalar(xor)", "sequential(xor)", "simd(xor)"}, xor_rounds, mersenneXOR, scalarXOR, sequentialXOR, simdXOR);
+    std::cout << '\n';
 
     alignas(XoroshiroRNG::REGISTER_BYTE_SIZE) std::array<uint32_t, NUM_ARRAY> arr{};
     arr.fill(0); // Make sure all the memory is mapped before filling
@@ -193,8 +205,15 @@ int main(int argc, char** argv) {
         return 0;
     };
 
+    auto mersenneFill = [&] {
+        for (size_t i{}; i < NUM_ARRAY; ++i) {
+            arr[i] = uint_dist(mersenne);
+        }
+        return 0;
+    };
+
     constexpr size_t fill_rounds = 100;
-    bench(NUM_ARRAY, std::array<std::string_view, 2>{"scalar(fill)", "simd(fill)"}, fill_rounds, scalarFill, simdFill);
+    bench(NUM_ARRAY, std::array<std::string_view, 3>{"mersenne(fill)", "scalar(fill)", "simd(fill)"}, fill_rounds, mersenneFill, scalarFill, simdFill);
 
     return 0;
 }
